@@ -907,7 +907,9 @@
     try {
       if (typeof window.html2canvas !== 'function') throw new Error('导出组件未加载');
       window.html2canvas(resultNode, {
-        scale: 2,
+        // 固定 3 倍 CSS 像素（不跟设备 DPR 叠加，结果可预测）：
+        // 实测 906x4716、约 480KB，覆盖高分屏又不会撑爆低端机内存。
+        scale: 3,
         backgroundColor: '#F7F5F0',
         useCORS: true,
         windowWidth: resultNode.scrollWidth,
