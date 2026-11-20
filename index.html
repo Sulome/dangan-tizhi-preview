@@ -906,17 +906,51 @@
 
     try {
       if (typeof window.html2canvas !== 'function') throw new Error('导出组件未加载');
+
+      // 导出倍率：按设备像素比算，下限 4、上限 5。
+      // 手机 DPR3 + 结果页 302px CSS 宽 → 4 倍出 1208px，盖得住屏幕物理宽（1170px）才不会显软；
+      // 封顶 5，别让低端机为了更高的倍率去啃 1MB+ 的图。
+      var dpr = window.devicePixelRatio || 1;
+      var exportScale = Math.min(5, Math.max(4, Math.ceil(dpr)));
+
       window.html2canvas(resultNode, {
-        // 固定 3 倍 CSS 像素（不跟设备 DPR 叠加，结果可预测）：
-        // 实测 906x4716、约 480KB，覆盖高分屏又不会撑爆低端机内存。
-        scale: 3,
+        scale: exportScale,
         backgroundColor: '#F7F5F0',
         useCORS: true,
         windowWidth: resultNode.scrollWidth,
         windowHeight: resultNode.scrollHeight,
         scrollX: 0,
         scrollY: -window.scrollY,
+        // 关键：html2canvas 在克隆文档里会重播 CSS 动画，
+        // 本页 .screen 有 animation:fade .28s ease both，
+        // 不关掉就会截到淡入到一半的画面 —— 整张图发灰、字发虚。
+        // 只动「正在跑动画」的元素，不碰其他元素自身的透明度/位移（那是设计的一部分）。
+        onclone: function(clonedDoc){
+          var win = clonedDoc.defaultView || window;
+          var nodes = clonedDoc.querySelectorAll('*');
+          for (var i = 0; i < nodes.length; i++){
+            var el = nodes[i];
+            if (!el.style || !win.getComputedStyle) continue;
+            var cs = win.getComputedStyle(el);
+            var running = (cs.animationName && cs.animationName !== 'none') ||
+                          (cs.transitionDuration && cs.transitionDuration !== '0s' && cs.transitionDuration !== '');
+            if (running){
+              el.style.animation = 'none';
+              el.style.transition = 'none';
+              el.style.opacity = '1';
+              el.style.transform = 'none';
+            }
+          }
+          // 保险：结果页根节点和三个 .screen 无论如何都摆到最终态
+          var screens = clonedDoc.querySelectorAll('.screen');
+          for (var j = 0; j < screens.length; j++){
+            screens[j].style.animation = 'none';
+            screens[j].style.opacity = '1';
+            screens[j].style.transform = 'none';
+          }
+        },
       }).then(function(canvas){
+        window.__lastExportCanvas__ = canvas;
         var dataUrl = canvas.toDataURL('image/png');
         done();
         openExport(dataUrl);
@@ -975,6 +1009,20 @@
       shareVisible: function(){ return $exportShare.style.display !== 'none'; },
       close: closeExport,
       open: openExport,
+      // 给自测用：读导出 canvas 的实际像素，验证画面没被动画冲淡
+      canvasStats: function(){
+        var cv = window.__lastExportCanvas__;
+        if (!cv) return null;
+        var ctx = cv.getContext('2d');
+        var d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+        var darkest = 255, darkCount = 0;
+        for (var i = 0; i < d.length; i += 4){
+          var lum = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+          if (lum < darkest) darkest = lum;
+          if (lum < 60) darkCount++;
+        }
+        return { w: cv.width, h: cv.height, darkest: Math.round(darkest), darkCount: darkCount };
+      },
     },
     answersList: function(){ return answers.slice(); },
     setAnswers: function(list){ answers = list.slice(); },
