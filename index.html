@@ -121,6 +121,14 @@
   }
   .opt.chosen{background:var(--accent-soft);border-color:var(--accent)}
   .opt.chosen .idx{color:var(--accent)}
+  .btn-back{
+    display:block;width:100%;margin-top:18px;
+    background:transparent;border:1px solid var(--line);color:var(--ink-2);
+    font-family:inherit;font-size:14px;font-weight:600;
+    padding:13px 16px;border-radius:var(--radius);cursor:pointer;
+  }
+  .btn-back:active{background:var(--accent-soft);border-color:var(--accent)}
+  .btn-back[hidden]{display:none}
 
   /* ---------- 结果 ---------- */
   .result{justify-content:flex-start;padding-top:8px}
@@ -271,6 +279,7 @@
     <p class="qcount" id="qcount">第 1 / 20 题</p>
     <h2 class="qtext" id="qtext"></h2>
     <div class="opts" id="opts"></div>
+    <button class="btn-back" id="btn-back" type="button">← 返回上一题</button>
   </section>
 
   <!-- 结果 -->
@@ -668,6 +677,7 @@
   var answers = [];
   var cursor = 0;
   var lastFocus = null;
+  var advanceTimer = null;
 
   var $cover = document.getElementById('screen-cover');
   var $quiz = document.getElementById('screen-quiz');
@@ -676,6 +686,7 @@
   var $qcount = document.getElementById('qcount');
   var $qtext = document.getElementById('qtext');
   var $opts = document.getElementById('opts');
+  var $back = document.getElementById('btn-back');
   var $score = document.getElementById('score');
   var $band = document.getElementById('band');
   var $judge = document.getElementById('judge');
@@ -697,25 +708,37 @@
   }
 
   function renderQuestion(){
+    // 重进本题时先清掉上一次可能悬空的推进定时器，避免回退串到下一题
+    if (advanceTimer !== null){ clearTimeout(advanceTimer); advanceTimer = null; }
     var q = QUESTIONS[cursor];
     $qcount.textContent = '第 ' + (cursor + 1) + ' / ' + QUESTIONS.length + ' 题';
     $bar.style.width = ((cursor) / QUESTIONS.length * 100) + '%';
     $qtext.textContent = q.text;
+    // 第一题没有上一题，隐藏返回按钮
+    $back.hidden = (cursor === 0);
     $opts.innerHTML = '';
     q.options.forEach(function(option, index){
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'opt';
+      // 回退重选时，把这题之前选过的选项复原成选中态
+      if (answers[cursor] === index) btn.classList.add('chosen');
       var idx = document.createElement('span');
       idx.className = 'idx';
       idx.textContent = String.fromCharCode(65 + index);
       btn.appendChild(idx);
       btn.appendChild(document.createTextNode(' ' + option.t));
       btn.addEventListener('click', function(){
+        // 再点一次同题时，把之前那次悬空的推进定时器清掉
+        if (advanceTimer !== null){ clearTimeout(advanceTimer); advanceTimer = null; }
+        // 清掉所有选项的选中态，只让当前这个亮
+        for (var k = 0; k < $opts.children.length; k++) $opts.children[k].classList.remove('chosen');
         btn.classList.add('chosen');
+        // 覆盖式写入：回退重选就是改这一题的答案，不会重复累加计分
         answers[cursor] = index;
         // 小延迟让选中态可见，然后进下一题
-        setTimeout(function(){
+        advanceTimer = setTimeout(function(){
+          advanceTimer = null;
           if (cursor + 1 < QUESTIONS.length){
             cursor += 1;
             renderQuestion();
@@ -728,6 +751,14 @@
       $opts.appendChild(btn);
     });
   }
+
+  // 返回上一题：回退后该题可重新选，答案覆盖式改写，计分不重复
+  $back.addEventListener('click', function(){
+    if (cursor === 0) return;
+    if (advanceTimer !== null){ clearTimeout(advanceTimer); advanceTimer = null; }
+    cursor -= 1;
+    renderQuestion();
+  });
 
   function renderResult(){
     var r = scoreOf(answers);
@@ -832,6 +863,7 @@
   }
 
   document.getElementById('btn-start').addEventListener('click', function(){
+    if (advanceTimer !== null){ clearTimeout(advanceTimer); advanceTimer = null; }
     answers = [];
     cursor = 0;
     show($quiz);
@@ -981,6 +1013,7 @@
   });
 
   document.getElementById('btn-again').addEventListener('click', function(){
+    if (advanceTimer !== null){ clearTimeout(advanceTimer); advanceTimer = null; }
     answers = [];
     cursor = 0;
     show($cover);
@@ -1025,6 +1058,15 @@
       },
     },
     answersList: function(){ return answers.slice(); },
+    currentCursor: function(){ return cursor; },
+    backHidden: function(){ return $back.hidden; },
+    chosenIndex: function(){
+      for (var i = 0; i < $opts.children.length; i++){
+        if ($opts.children[i].classList.contains('chosen')) return i;
+      }
+      return -1;
+    },
+    clickBack: function(){ $back.click(); },
     setAnswers: function(list){ answers = list.slice(); },
     finish: function(){ renderResult(); },
     goTo: function(index){ cursor = index; show($quiz); renderQuestion(); },
